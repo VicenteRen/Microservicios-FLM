@@ -1,3 +1,4 @@
+
 package cl.ferreterialosmaestros.ventas.model;
 
 import jakarta.persistence.*;
@@ -17,7 +18,7 @@ public class Venta {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Datos del cliente (Checkout)
+    // Datos del cliente
     @Column(nullable = false)
     private String nombreCliente;
 
@@ -32,7 +33,7 @@ public class Venta {
     private String region;
     private String comuna;
 
-    // Datos del producto conectado vía OpenFeign con ms-productos
+    // Datos del producto
     @Column(nullable = false)
     private Long productoId;
 
@@ -46,10 +47,25 @@ public class Venta {
 
     private LocalDateTime fechaVenta;
 
+    // Estado de la venta
+    @Column(length = 20)
+    private String estado = "ACTIVA";
+
     @PrePersist
     public void prePersist() {
-        if (this.fechaVenta == null) {
-            this.fechaVenta = LocalDateTime.now();
+        if (fechaVenta == null) {
+            fechaVenta = LocalDateTime.now();
+        }
+
+        if (estado == null || estado.isBlank()) {
+            estado = "ACTIVA";
+        }
+    }
+
+    @PostLoad
+    public void postLoad() {
+        if (estado == null || estado.isBlank()) {
+            estado = "ACTIVA";
         }
     }
 }
