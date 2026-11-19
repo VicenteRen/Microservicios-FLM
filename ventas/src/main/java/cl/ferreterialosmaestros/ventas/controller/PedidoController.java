@@ -17,11 +17,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/pedidos")
+@RequestMapping("/api/ventas")
 @CrossOrigin(origins = "http://localhost:5173")
 @Tag(
-    name = "Gestión de Pedidos",
-    description = "Operaciones para registrar, consultar y anular compras con varios productos"
+    name = "Gestión de Ventas",
+    description = "Registro, consulta y anulación de ventas con uno o varios productos"
 )
 public class PedidoController {
 
@@ -84,6 +84,28 @@ public class PedidoController {
 
         return ResponseEntity.ok(service.obtener(id));
     }
+
+
+    // Actualizar una venta confirmada
+    @Operation(
+        summary = "Actualizar venta",
+        description = "Permite corregir datos del cliente y modificar productos o cantidades de una venta confirmada. Ajusta automaticamente el inventario y recalcula el total."
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Venta actualizada"),
+        @ApiResponse(responseCode = "400", description = "Datos invalidos"),
+        @ApiResponse(responseCode = "404", description = "Venta no encontrada"),
+        @ApiResponse(responseCode = "409", description = "Stock insuficiente o venta anulada"),
+        @ApiResponse(responseCode = "503", description = "Productos no disponible")
+    })
+    @PutMapping("/{id}")
+    public ResponseEntity<PedidoResponse> actualizarVenta(
+            @PathVariable Long id,
+            @RequestBody PedidoRequest datos) {
+
+        return ResponseEntity.ok(service.actualizar(id, datos));
+    }
+
 
     // 4. Anular un pedido completo
     @Operation(

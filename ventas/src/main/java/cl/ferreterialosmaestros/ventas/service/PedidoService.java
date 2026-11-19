@@ -26,6 +26,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Comparator;
+
 @Service
 public class PedidoService {
 
@@ -482,6 +486,258 @@ public class PedidoService {
                 productos
         );
     }
+
+
+    // Actualizar una venta confirmada y ajustar el inventario
+    public PedidoResponse actualizar(Long id, PedidoRequest datos) {
+
+        if (id == null || id <= 0) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "ID de venta invalido");
+        }
+
+        validarSolicitud(datos);
+
+        List<MovimientoVenta> aplicados = new ArrayList<>();
+
+        try {
+            return transacciones.execute(estado -> {
+
+                Pedido venta = repository.buscarParaAnular(id)
+                        .orElseThrow(() -> new ResponseStatusException(
+                                HttpStatus.NOT_FOUND,
+                                "Venta no encontrada"));
+
+                if (!"CONFIRMADO".equals(venta.getEstado())) {
+                    throw new ResponseStatusException(
+                            HttpStatus.CONFLICT,
+                            "Solo pueden editarse ventas confirmadas");
+                }
+
+                // Productos que tenía la venta originalmente
+                Map<Long, DetallePedido> anteriores = new HashMap<>();
+
+                for (DetallePedido detalle : venta.getDetalles()) {
+                    anteriores.put(detalle.getProductoId(), detalle);
+                }
+
+                List<LineaVenta> lineas = new ArrayList<>();
+                BigDecimal total = BigDecimal.ZERO.setScale(2);
+
+                // Preparar las nuevas cantidades y precios
+                for (PedidoRequest.Item item : datos.productos()) {
+
+                    DetallePedido anterior =
+                            anteriores.get(item.productoId());
+
+                    int cantidadAnterior = anterior == null
+                            ? 0 : anterior.getCantidad();
+
+                    ProductoDTO producto = null;
+
+                    // Consultar stock solo si necesitamos más unidades
+                    if (item.cantidad() > cantidadAnterior) {
+
+                        producto = consultarProducto(item.productoId());
+
+                        if (producto == null
+                                || producto.getStock() == null
+                                || producto.getStock() < 0) {
+
+                            throw new ResponseStatusException(
+                                    HttpStatus.CONFLICT,
+                                    "Inventario no disponible");
+                        }
+
+                        int adicionales =
+                                item.cantidad() - cantidadAnterior;
+
+                        if (producto.getStock() < adicionales) {
+                            throw new ResponseStatusException(
+                                    HttpStatus.CONFLICT,
+                                    "Stock insuficiente del producto "
+                                            + item.productoId());
+                        }
+                    }
+
+                    String nombre;
+                    BigDecimal precio;
+
+                    if (anterior != null) {
+                        // Mantener precio original de la venta
+                        nombre = anterior.getNombreProducto();
+                        precio = anterior.getPrecioUnitario();
+
+                    } else {
+                        // Producto nuevo: usar precio oficial
+                        if (producto == null
+                                || producto.getPrecio() == null
+                                || !Double.isFinite(producto.getPrecio())
+                                || producto.getPrecio() < 0
+                                || vacio(producto.getNombre())) {
+
+                            throw new ResponseStatusException(
+                                    HttpStatus.CONFLICT,
+                                    "Datos de producto invalidos");
+                        }
+
+                        nombre = producto.getNombre();
+                        precio = BigDecimal.valueOf(producto.getPrecio())
+                                .setScale(2, RoundingMode.HALF_UP);
+                    }
+
+                    BigDecimal subtotal = precio.multiply(
+                            BigDecimal.valueOf(item.cantidad()));
+
+                    total = total.add(subtotal);
+
+                    if (total.compareTo(MONTO_MAXIMO) > 0) {
+                        throw new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "Monto de venta demasiado alto");
+                    }
+
+                    lineas.add(new LineaVenta(
+                            item.productoId(),
+                            nombre,
+                            item.cantidad(),
+                            precio,
+                            subtotal));
+                }
+
+                // Calcular las diferencias de inventario
+                List<MovimientoVenta> movimientos = new ArrayList<>();
+                Set<Long> idsNuevos = new HashSet<>();
+
+                for (LineaVenta linea : lineas) {
+
+                    idsNuevos.add(linea.productoId());
+
+                    DetallePedido anterior =
+                            anteriores.get(linea.productoId());
+
+                    int cantidadAnterior = anterior == null
+                            ? 0 : anterior.getCantidad();
+
+                    int variacion =
+                            cantidadAnterior - linea.cantidad();
+
+                    if (variacion != 0) {
+                        movimientos.add(new MovimientoVenta(
+                                linea.productoId(), variacion));
+                    }
+                }
+
+                // Productos eliminados: devolver su stock
+                for (DetallePedido anterior : venta.getDetalles()) {
+
+                    if (!idsNuevos.contains(anterior.getProductoId())) {
+                        movimientos.add(new MovimientoVenta(
+                                anterior.getProductoId(),
+                                anterior.getCantidad()));
+                    }
+                }
+
+                // Aplicar descuentos antes de las devoluciones
+                movimientos.sort(
+                        Comparator.comparingInt(
+                                MovimientoVenta::variacion));
+
+                for (MovimientoVenta movimiento : movimientos) {
+
+                    moverStock(
+                            movimiento.productoId(),
+                            movimiento.variacion());
+
+                    aplicados.add(movimiento);
+                }
+
+                // Actualizar datos del cliente
+                venta.setNombreCliente(datos.nombreCliente().trim());
+                venta.setApellidosCliente(datos.apellidosCliente().trim());
+                venta.setCorreoCliente(datos.correoCliente().trim());
+                venta.setDireccionEnvio(datos.direccionEnvio().trim());
+                venta.setRegion(datos.region().trim());
+                venta.setComuna(datos.comuna().trim());
+
+                // Quitar los productos que ya no pertenecen a la venta
+                venta.getDetalles().removeIf(detalle ->
+                        !idsNuevos.contains(detalle.getProductoId()));
+
+                // Actualizar cantidades o agregar nuevos productos
+                for (LineaVenta linea : lineas) {
+
+                    DetallePedido detalle =
+                            anteriores.get(linea.productoId());
+
+                    if (detalle == null) {
+                        detalle = new DetallePedido();
+                        detalle.setProductoId(linea.productoId());
+                        venta.agregarDetalle(detalle);
+                    }
+
+                    detalle.setNombreProducto(linea.nombre());
+                    detalle.setCantidad(linea.cantidad());
+                    detalle.setPrecioUnitario(linea.precio());
+                    detalle.setSubtotal(linea.subtotal());
+                }
+
+                venta.setTotal(total);
+                repository.saveAndFlush(venta);
+
+                return aRespuesta(venta);
+            });
+
+        } catch (RuntimeException error) {
+
+            // Intentar revertir cambios si falla la actualización
+            boolean falloReversion = false;
+
+            for (int i = aplicados.size() - 1; i >= 0; i--) {
+
+                MovimientoVenta movimiento = aplicados.get(i);
+
+                try {
+                    moverStock(
+                            movimiento.productoId(),
+                            -movimiento.variacion());
+
+                } catch (RuntimeException errorStock) {
+
+                    falloReversion = true;
+                    error.addSuppressed(errorStock);
+
+                    log.error(
+                            "No se pudo restaurar stock del producto {}",
+                            movimiento.productoId(),
+                            errorStock);
+                }
+            }
+
+            if (falloReversion) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "El inventario requiere revision manual",
+                        error);
+            }
+
+            throw error;
+        }
+    }
+
+    private record MovimientoVenta(
+            Long productoId,
+            int variacion
+    ) {}
+
+    private record LineaVenta(
+            Long productoId,
+            String nombre,
+            int cantidad,
+            BigDecimal precio,
+            BigDecimal subtotal
+    ) {}
+
 
     private boolean vacio(String texto) {
         return texto == null || texto.isBlank();
