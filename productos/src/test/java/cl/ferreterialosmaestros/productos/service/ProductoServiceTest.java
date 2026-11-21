@@ -7,12 +7,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -143,5 +146,62 @@ class ProductoServiceTest {
 
         // comprobar
         verify(repository, times(1)).deleteById(1L);
+    }
+
+    @Test
+    void modificarStock_conVariacionNegativaValida_descuentaStock() {
+        when(repository.modificarStock(1L, -2)).thenReturn(1);
+
+        assertDoesNotThrow(() -> service.modificarStock(1L, -2));
+
+        verify(repository, times(1)).modificarStock(1L, -2);
+        verify(repository, never()).existsById(anyLong());
+    }
+
+    @Test
+    void modificarStock_conVariacionPositivaValida_restituyeStock() {
+        when(repository.modificarStock(1L, 3)).thenReturn(1);
+
+        assertDoesNotThrow(() -> service.modificarStock(1L, 3));
+
+        verify(repository, times(1)).modificarStock(1L, 3);
+        verify(repository, never()).existsById(anyLong());
+    }
+
+    @Test
+    void modificarStock_conVariacionCero_lanzaBadRequest() {
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.modificarStock(1L, 0)
+        );
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+        verify(repository, never()).modificarStock(anyLong(), anyInt());
+    }
+
+    @Test
+    void modificarStock_conProductoInexistente_lanzaNotFound() {
+        when(repository.modificarStock(99L, -2)).thenReturn(0);
+        when(repository.existsById(99L)).thenReturn(false);
+
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.modificarStock(99L, -2)
+        );
+
+        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
+    void modificarStock_conStockInsuficiente_lanzaConflict() {
+        when(repository.modificarStock(1L, -50)).thenReturn(0);
+        when(repository.existsById(1L)).thenReturn(true);
+
+        ResponseStatusException ex = assertThrows(
+            ResponseStatusException.class,
+            () -> service.modificarStock(1L, -50)
+        );
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
     }
 }
