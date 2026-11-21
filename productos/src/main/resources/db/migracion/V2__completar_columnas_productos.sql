@@ -1,0 +1,9 @@
+ALTER TABLE productos
+    ADD COLUMN codigo VARCHAR(50) NOT NULL,
+    ADD COLUMN subcategoria VARCHAR(100),
+    ADD COLUMN marca VARCHAR(100),
+    ADD COLUMN unidad VARCHAR(50) DEFAULT 'Unidad',
+    ADD COLUMN precio_compra DOUBLE DEFAULT 0,
+    ADD COLUMN stock_minimo INT NOT NULL DEFAULT 5,
+    ADD COLUMN imagen VARCHAR(255) NOT NULL,
+    ADD COLUMN descripcion TEXT NOT NULL;
