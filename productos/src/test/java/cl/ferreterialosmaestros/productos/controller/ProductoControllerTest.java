@@ -9,7 +9,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -172,5 +173,46 @@ class ProductoControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(productoService, never()).guardarProducto(any());
+    }
+
+    @Test
+    void modificarStock_conVariacionValida_retornaNoContent() throws Exception {
+        doNothing().when(productoService).modificarStock(1L, -2);
+
+        mockMvc.perform(post("/api/productos/1/movimiento-stock")
+                .param("variacion", "-2"))
+                .andExpect(status().isNoContent());
+
+        verify(productoService, times(1)).modificarStock(1L, -2);
+    }
+
+    @Test
+    void modificarStock_conVariacionCero_retornaBadRequest() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "La variacion no puede ser cero"))
+                .when(productoService).modificarStock(1L, 0);
+
+        mockMvc.perform(post("/api/productos/1/movimiento-stock")
+                .param("variacion", "0"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void modificarStock_conProductoInexistente_retornaNotFound() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Producto no encontrado"))
+                .when(productoService).modificarStock(99L, -2);
+
+        mockMvc.perform(post("/api/productos/99/movimiento-stock")
+                .param("variacion", "-2"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void modificarStock_conStockInsuficiente_retornaConflict() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.CONFLICT, "Stock insuficiente"))
+                .when(productoService).modificarStock(1L, -50);
+
+        mockMvc.perform(post("/api/productos/1/movimiento-stock")
+                .param("variacion", "-50"))
+                .andExpect(status().isConflict());
     }
 }

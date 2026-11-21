@@ -81,7 +81,7 @@ public class ProductoController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Eliminar un producto", description = "Elimina un producto del inventario según su ID.")
+    @Operation(summary = "Eliminar un producto", description = "Elimina permanentemente un producto del inventario según su ID.")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "204", description = "Producto eliminado correctamente"),
         @ApiResponse(responseCode = "404", description = "No se encontró un producto con el ID especificado")
@@ -95,5 +95,25 @@ public class ProductoController {
             return new ResponseEntity<>(HttpStatus.NO_CONTENT);
         }
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+    }
+
+    @PostMapping("/{id}/movimiento-stock")
+    @Operation(
+        summary = "Modificar stock",
+        description = "Descuenta unidades con una variación negativa o restituye unidades con una variación positiva."
+    )
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "204", description = "Stock actualizado correctamente"),
+        @ApiResponse(responseCode = "400", description = "Variación inválida"),
+        @ApiResponse(responseCode = "404", description = "Producto no encontrado"),
+        @ApiResponse(responseCode = "409", description = "Stock insuficiente")
+    })
+    public ResponseEntity<Void> modificarStock(
+            @Parameter(description = "ID del producto cuyo stock se modificará", example = "1")
+            @PathVariable Long id,
+            @Parameter(description = "Cantidad a descontar (negativo) o restituir (positivo)", example = "-2")
+            @RequestParam int variacion) {
+        service.modificarStock(id, variacion);
+        return ResponseEntity.noContent().build();
     }
 }
